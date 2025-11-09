@@ -1,0 +1,158 @@
+name: Multi-Platform Matrix Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  matrix-build:
+    name: Build ${{ matrix.os }} - Node ${{ matrix.node-version }}
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: [18, 20]
+        include:
+          # Add additional build variant
+          - os: ubuntu-latest
+            node-version: 16
+            experimental: true
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      
+      - name: matrix-5976bde
+        run: |
+          echo "Building for ${{ matrix.os }} with Node ${{ matrix.node-version }}"
+          echo "Matrix configuration: OS=${{ matrix.os }}, Node=${{ matrix.node-version }}"
+      
+      - name: Install dependencies
+        run: |
+          npm init -y
+          npm install --save express
+      
+      - name: Generate build metadata
+        run: |
+          node -e "console.log(JSON.stringify({
+            os: '${{ matrix.os }}',
+            nodeVersion: '${{ matrix.node-version }}',
+            timestamp: new Date().toISOString(),
+            runner: process.platform,
+            arch: process.arch,
+            buildNumber: '${{ github.run_number }}'
+          }, null, 2))" > build-metadata.json
+        shell: bash
+      
+      - name: Create build artifact
+        run: |
+          mkdir -p build-output
+          echo "Build completed successfully!" > build-output/build.txt
+          echo "OS: ${{ matrix.os }}" >> build-output/build.txt
+          echo "Node Version: ${{ matrix.node-version }}" >> build-output/build.txt
+          echo "Build Time: $(date)" >> build-output/build.txt
+          echo "Commit SHA: ${{ github.sha }}" >> build-output/build.txt
+          cp build-metadata.json build-output/
+        shell: bash
+      
+      - name: Generate sample application
+        run: |
+          cat > build-output/app.js << 'EOF'
+          const express = require('express');
+          const app = express();
+          const port = 3000;
+
+          app.get('/', (req, res) => {
+            res.json({
+              message: 'Hello from matrix build!',
+              os: '${{ matrix.os }}',
+              nodeVersion: '${{ matrix.node-version }}',
+              platform: process.platform,
+              arch: process.arch
+            });
+          });
+
+          app.listen(port, () => {
+            console.log(`App listening at http://localhost:${port}`);
+          });
+          EOF
+        shell: bash
+      
+      - name: Display build info
+        run: |
+          echo "=== Build Information ==="
+          cat build-output/build.txt
+          echo ""
+          echo "=== Build Metadata ==="
+          cat build-output/build-metadata.json
+        shell: bash
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-5976bde-${{ matrix.os }}-node${{ matrix.node-version }}
+          path: build-output/
+          retention-days: 30
+      
+      - name: Build summary
+        run: |
+          echo "### Build Summary :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **OS**: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Node Version**: ${{ matrix.node-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact**: build-5976bde-${{ matrix.os }}-node${{ matrix.node-version }}" >> $GITHUB_STEP_SUMMARY
+        shell: bash
+
+  collect-artifacts:
+    name: Collect and Verify Artifacts
+    needs: matrix-build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+      
+      - name: List artifacts
+        run: |
+          echo "=== Downloaded Artifacts ==="
+          ls -R all-artifacts/
+          echo ""
+          echo "=== Artifact Count ==="
+          find all-artifacts -type f -name "build.txt" | wc -l
+      
+      - name: Create summary report
+        run: |
+          echo "# Matrix Build Report" > report.md
+          echo "" >> report.md
+          echo "## Artifacts Generated" >> report.md
+          echo "" >> report.md
+          for dir in all-artifacts/*/; do
+            artifact_name=$(basename "$dir")
+            echo "### $artifact_name" >> report.md
+            if [ -f "$dir/build.txt" ]; then
+              echo '```' >> report.md
+              cat "$dir/build.txt" >> report.md
+              echo '```' >> report.md
+            fi
+            echo "" >> report.md
+          done
+          
+          cat report.md >> $GITHUB_STEP_SUMMARY
+      
+      - name: Upload combined report
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-5976bde-report
+          path: report.md
